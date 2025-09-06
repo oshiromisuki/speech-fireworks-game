@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音声花火ゲーム with AI感情分析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            display: block;
+            background: linear-gradient(135deg, #001122, #000033);
+        }
+        
+        .controls {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .controls button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        .controls button:hover {
+            background: #45a049;
+        }
+        
+        .controls button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .controls button.recording {
+            background: #f44336;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .controls input {
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        
+        .controls input::placeholder {
+            color: #aaa;
+        }
+        
+        .status {
+            font-size: 12px;
+            color: #aaa;
+            margin-left: 10px;
+        }
+        
+        .sentiment-display {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: 10px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        
+        .sentiment-score {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .sentiment-label {
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .sentiment-confidence {
+            color: #aaa;
+        }
+        
+        .audio-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 10px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        
+        .audio-controls button {
+            padding: 6px 10px;
+            border: none;
+            border-radius: 3px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s;
+        }
+        
+        .audio-controls button:hover {
+            background: #45a049;
+        }
+        
+        .audio-controls button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .audio-controls button.active {
+            background: #f44336;
+        }
+        
+        .audio-controls button.muted {
+            background: #ff9800;
+        }
+        
+        .volume-slider {
+            width: 60px;
+            height: 4px;
+            background: #555;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+        
+        .volume-slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: #4CAF50;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        .track-info {
+            font-size: 10px;
+            color: #aaa;
+            min-width: 80px;
+        }
+        
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .controls input {
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <button id="micBtn">🎤 音声認識開始</button>
+        <input type="text" id="textInput" placeholder="テキストを入力してください" maxlength="50">
+        <button id="launchBtn">🎆 打ち上げ</button>
+        <div class="status" id="status">準備完了</div>
+        <div class="sentiment-display" id="sentimentDisplay" style="display: none;">
+            <span class="sentiment-score" id="sentimentScore">-</span>
+            <span class="sentiment-label" id="sentimentLabel">-</span>
+            <span class="sentiment-confidence" id="sentimentConfidence">-</span>
+        </div>
+        <div class="audio-controls" id="audioControls">
+            <button id="playPauseBtn" title="再生/停止">▶️</button>
+            <button id="prevTrackBtn" title="前のトラック">⏮️</button>
+            <button id="nextTrackBtn" title="次のトラック">⏭️</button>
+            <button id="muteBtn" title="ミュート">🔊</button>
+            <input type="range" id="volumeSlider" class="volume-slider" min="0" max="100" value="30" title="音量">
+            <div class="track-info" id="trackInfo">BGM停止中</div>
+        </div>
+    </div>
+
+    <!-- 外部スクリプトの読み込み -->
+    <script src="config.js"></script>
+    <script src="sentiment-api.js"></script>
+    <script src="audio-service.js"></script>
+
+    <script>
+        // 定数定義
+        const CONFIG = {
+            DOT_GAP: 3,           // ドットのサンプリング間隔
+            HOLD_MS: 1000,        // 文字形状を保持する時間
+            SPREAD_SPEED: 2,      // 拡散速度
+            FADE_SPEED: 0.02,     // フェード速度
+            MAX_LIFE: 1.0,        // 粒子の最大寿命
+            FONT_SIZE_BASE: 120,  // ベースフォントサイズ
+            FONT_SIZE_MIN: 40,    // 最小フォントサイズ
+            MAX_TEXT_WIDTH: 0.8   // 画面幅に対する最大テキスト幅
+        };
+
+        // 設定の初期化
+        let isApiConfigured = false;
+        
+        // ページ読み込み時に設定を初期化
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof initializeConfig === 'function') {
+                isApiConfigured = initializeConfig();
+            }
+            
+            if (!isApiConfigured) {
+                console.warn('API設定が正しくありません。config.jsファイルでAPIキーを設定してください。');
+            }
+        });
+
+        class Particle {
+            constructor(x, y, color = null) {
+                this.startX = x;
+                this.startY = y;
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.life = CONFIG.MAX_LIFE;
+                this.phase = 'hold'; // 'hold' -> 'spread'
+                this.color = color || `hsl(${Math.random() * 60 + 30}, 100%, 70%)`;
+            }
+
+            update() {
+                if (this.phase === 'spread') {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.life -= CONFIG.FADE_SPEED;
+                }
+            }
+
+            startSpread() {
+                this.phase = 'spread';
+                this.vx = (Math.random() - 0.5) * CONFIG.SPREAD_SPEED * 4;
+                this.vy = (Math.random() - 0.5) * CONFIG.SPREAD_SPEED * 4;
+            }
+
+            draw(ctx) {
+                if (this.life <= 0) return;
+                
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - 1, this.y - 1, 2, 2);
+                ctx.globalAlpha = 1;
+            }
+
+            isDead() {
+                return this.life <= 0;
+            }
+        }
+
+        class FireworksGame {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.particles = [];
+                this.queue = [];
+                this.isPlaying = false;
+                this.currentShow = null;
+                
+                this.recognition = null;
+                this.isRecording = false;
+                this.currentSentiment = null;
+                
+                this.init();
+            }
+
+            init() {
+                this.setupCanvas();
+                this.setupSpeechRecognition();
+                this.setupEventListeners();
+                this.setupAudioControls();
+                this.startGameLoop();
+                
+                window.addEventListener('resize', this.debounce(() => {
+                    this.setupCanvas();
+                }, 250));
+            }
+
+            setupCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            setupSpeechRecognition() {
+                if ('webkitSpeechRecognition' in window) {
+                    this.recognition = new webkitSpeechRecognition();
+                    this.recognition.lang = 'ja-JP';
+                    this.recognition.continuous = false;
+                    this.recognition.interimResults = false;
+
+                    this.recognition.onstart = () => {
+                        this.isRecording = true;
+                        this.updateUI();
+                        this.setStatus('音声を認識中...');
+                    };
+
+                    this.recognition.onresult = (event) => {
+                        const text = event.results[0][0].transcript;
+                        this.setStatus(`認識: "${text}"`);
+                        this.processText(text);
+                    };
+
+                    this.recognition.onerror = (event) => {
+                        this.setStatus(`エラー: ${event.error}`);
+                        this.isRecording = false;
+                        this.updateUI();
+                    };
+
+                    this.recognition.onend = () => {
+                        this.isRecording = false;
+                        this.updateUI();
+                    };
+                } else {
+                    this.setStatus('音声認識は非対応です。テキスト入力をご利用ください。');
+                    document.getElementById('micBtn').disabled = true;
+                }
+            }
+
+            setupEventListeners() {
+                document.getElementById('micBtn').addEventListener('click', () => {
+                    if (this.isRecording) {
+                        this.recognition.stop();
+                    } else {
+                        this.recognition.start();
+                    }
+                });
+
+                document.getElementById('launchBtn').addEventListener('click', () => {
+                    const text = document.getElementById('textInput').value.trim();
+                    if (text) {
+                        this.processText(text);
+                        document.getElementById('textInput').value = '';
+                    }
+                });
+
+                document.getElementById('textInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        document.getElementById('launchBtn').click();
+                    }
+                });
+            }
+
+            // オーディオコントロールの設定
+            setupAudioControls() {
+                // 再生/停止ボタン
+                document.getElementById('playPauseBtn').addEventListener('click', async () => {
+                    try {
+                        if (audioService.isPlaying) {
+                            await audioService.stop();
+                        } else {
+                            await audioService.play();
+                        }
+                        this.updateAudioUI();
+                    } catch (error) {
+                        console.error('BGM操作エラー:', error);
+                        this.setStatus('BGM操作に失敗しました');
+                    }
+                });
+
+                // 前のトラックボタン
+                document.getElementById('prevTrackBtn').addEventListener('click', async () => {
+                    try {
+                        await audioService.previousTrack();
+                        this.updateAudioUI();
+                    } catch (error) {
+                        console.error('トラック変更エラー:', error);
+                        this.setStatus('トラック変更に失敗しました');
+                    }
+                });
+
+                // 次のトラックボタン
+                document.getElementById('nextTrackBtn').addEventListener('click', async () => {
+                    try {
+                        await audioService.nextTrack();
+                        this.updateAudioUI();
+                    } catch (error) {
+                        console.error('トラック変更エラー:', error);
+                        this.setStatus('トラック変更に失敗しました');
+                    }
+                });
+
+                // ミュートボタン
+                document.getElementById('muteBtn').addEventListener('click', () => {
+                    const isMuted = audioService.toggleMute();
+                    this.updateAudioUI();
+                });
+
+                // 音量スライダー
+                document.getElementById('volumeSlider').addEventListener('input', (e) => {
+                    const volume = e.target.value / 100;
+                    audioService.setVolume(volume);
+                    this.updateAudioUI();
+                });
+
+                // 初期UI更新
+                this.updateAudioUI();
+            }
+
+            // オーディオUIの更新
+            updateAudioUI() {
+                const status = audioService.getStatus();
+                const playPauseBtn = document.getElementById('playPauseBtn');
+                const muteBtn = document.getElementById('muteBtn');
+                const volumeSlider = document.getElementById('volumeSlider');
+                const trackInfo = document.getElementById('trackInfo');
+
+                // 再生/停止ボタン
+                if (status.isPlaying) {
+                    playPauseBtn.textContent = '⏸️';
+                    playPauseBtn.classList.add('active');
+                } else {
+                    playPauseBtn.textContent = '▶️';
+                    playPauseBtn.classList.remove('active');
+                }
+
+                // ミュートボタン
+                if (status.isMuted) {
+                    muteBtn.textContent = '🔇';
+                    muteBtn.classList.add('muted');
+                } else {
+                    muteBtn.textContent = '🔊';
+                    muteBtn.classList.remove('muted');
+                }
+
+                // 音量スライダー
+                volumeSlider.value = Math.round(status.volume * 100);
+
+                // トラック情報
+                if (status.isPlaying) {
+                    trackInfo.textContent = `${status.currentTrackName} (${status.currentTrackIndex + 1}/${status.totalTracks})`;
+                } else {
+                    trackInfo.textContent = 'BGM停止中';
+                }
+            }
+
+            textToParticles(text, sentiment = null) {
+                // フォントサイズを動的に調整
+                let fontSize = CONFIG.FONT_SIZE_BASE;
+                const maxWidth = this.canvas.width * CONFIG.MAX_TEXT_WIDTH;
+                
+                // オフスクリーンキャンバスでテキスト幅を測定
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                do {
+                    tempCtx.font = `bold ${fontSize}px sans-serif`;
+                    const metrics = tempCtx.measureText(text);
+                    if (metrics.width <= maxWidth || fontSize <= CONFIG.FONT_SIZE_MIN) {
+                        break;
+                    }
+                    fontSize -= 10;
+                } while (fontSize > CONFIG.FONT_SIZE_MIN);
+
+                // オフスクリーンキャンバスでテキストを描画
+                tempCanvas.width = maxWidth + 100;
+                tempCanvas.height = fontSize + 50;
+                tempCtx.font = `bold ${fontSize}px sans-serif`;
+                tempCtx.fillStyle = 'white';
+                tempCtx.textAlign = 'center';
+                tempCtx.textBaseline = 'middle';
+                tempCtx.fillText(text, tempCanvas.width / 2, tempCanvas.height / 2);
+
+                // ピクセルデータを取得
+                const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                const data = imageData.data;
+                const particles = [];
+
+                // 画面中央に配置するためのオフセット計算
+                const offsetX = (this.canvas.width - tempCanvas.width) / 2;
+                const offsetY = (this.canvas.height - tempCanvas.height) / 2;
+
+                // 感情に基づく色を決定
+                let baseColor = `hsl(${Math.random() * 60 + 30}, 100%, 70%)`; // デフォルト色
+                if (sentiment && sentiment.color) {
+                    baseColor = sentiment.color.hex;
+                    // スコアに応じて色の鮮やかさを調整
+                    const score = sentiment.score;
+                    const normalizedScore = (score - 1) / 9; // 0-1に正規化
+                    const brightness = 0.5 + (normalizedScore * 0.5); // 0.5-1.0の範囲
+                    baseColor = sentimentService.adjustColorBrightness(baseColor, brightness);
+                }
+
+                // ピクセルをサンプリングして粒子を生成
+                for (let y = 0; y < tempCanvas.height; y += CONFIG.DOT_GAP) {
+                    for (let x = 0; x < tempCanvas.width; x += CONFIG.DOT_GAP) {
+                        const index = (y * tempCanvas.width + x) * 4;
+                        const alpha = data[index + 3];
+                        
+                        if (alpha > 128) { // 透明度が50%以上の場合
+                            particles.push(new Particle(
+                                x + offsetX,
+                                y + offsetY,
+                                baseColor
+                            ));
+                        }
+                    }
+                }
+
+                return particles;
+            }
+
+            async processText(text) {
+                this.setStatus('感情分析中...');
+                
+                try {
+                    // 感情分析サービスの状態確認
+                    if (typeof sentimentService === 'undefined') {
+                        throw new Error('感情分析サービスが読み込まれていません');
+                    }
+                    
+                    const serviceStatus = sentimentService.getStatus();
+                    if (!serviceStatus.isInitialized || !serviceStatus.hasApiKey) {
+                        throw new Error('API設定が正しくありません。config.jsファイルでAPIキーを設定してください。');
+                    }
+                    
+                    // 感情分析を実行
+                    const sentiment = await sentimentService.analyzeSentiment(text);
+                    this.currentSentiment = sentiment;
+                    
+                    // UIに結果を表示
+                    this.updateSentimentDisplay(sentiment);
+                    
+                    // 花火を表示
+                    this.show(text, sentiment);
+                    
+                } catch (error) {
+                    console.error('感情分析エラー:', error);
+                    this.setStatus(`感情分析に失敗しました: ${error.message}`);
+                    
+                    // エラー時はデフォルト色で表示
+                    this.show(text, null);
+                }
+            }
+
+            show(text, sentiment = null) {
+                this.queue.push({ text, sentiment });
+                if (!this.isPlaying) {
+                    this.processQueue();
+                }
+            }
+
+            async processQueue() {
+                if (this.queue.length === 0) {
+                    this.isPlaying = false;
+                    return;
+                }
+
+                this.isPlaying = true;
+                const { text, sentiment } = this.queue.shift();
+                
+                // 新しい粒子を生成
+                this.particles = this.textToParticles(text, sentiment);
+                
+                // 保持フェーズ
+                await this.sleep(CONFIG.HOLD_MS);
+                
+                // 拡散フェーズ開始
+                this.particles.forEach(particle => particle.startSpread());
+                
+                // 拡散完了まで待機
+                await this.waitForSpreadComplete();
+                
+                // 次のキューを処理
+                this.processQueue();
+            }
+
+            waitForSpreadComplete() {
+                return new Promise(resolve => {
+                    const checkComplete = () => {
+                        if (this.particles.every(p => p.isDead())) {
+                            resolve();
+                        } else {
+                            requestAnimationFrame(checkComplete);
+                        }
+                    };
+                    checkComplete();
+                });
+            }
+
+            startGameLoop() {
+                const loop = () => {
+                    this.update();
+                    this.draw();
+                    requestAnimationFrame(loop);
+                };
+                loop();
+            }
+
+            update() {
+                this.particles.forEach(particle => particle.update());
+                this.particles = this.particles.filter(particle => !particle.isDead());
+            }
+
+            draw() {
+                // 背景をクリア
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // 粒子を描画
+                this.particles.forEach(particle => particle.draw(this.ctx));
+            }
+
+            updateUI() {
+                const micBtn = document.getElementById('micBtn');
+                if (this.isRecording) {
+                    micBtn.textContent = '🛑 停止';
+                    micBtn.classList.add('recording');
+                } else {
+                    micBtn.textContent = '🎤 音声認識開始';
+                    micBtn.classList.remove('recording');
+                }
+            }
+
+            setStatus(message) {
+                document.getElementById('status').textContent = message;
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            debounce(func, wait) {
+                let timeout;
+                return function executedFunction(...args) {
+                    const later = () => {
+                        clearTimeout(timeout);
+                        func(...args);
+                    };
+                    clearTimeout(timeout);
+                    timeout = setTimeout(later, wait);
+                };
+            }
+
+
+            // 感情分析結果のUI更新
+            updateSentimentDisplay(sentiment) {
+                const display = document.getElementById('sentimentDisplay');
+                const score = document.getElementById('sentimentScore');
+                const label = document.getElementById('sentimentLabel');
+                const confidence = document.getElementById('sentimentConfidence');
+
+                score.textContent = sentiment.score;
+                label.textContent = sentiment.labelJa;
+                confidence.textContent = `信頼度: ${(sentiment.confidence * 100).toFixed(0)}%`;
+
+                // 色に応じてスコアの色を変更
+                score.style.color = sentiment.color.hex;
+
+                display.style.display = 'flex';
+            }
+        }
+
+        // ゲーム開始
+        window.addEventListener('DOMContentLoaded', () => {
+            new FireworksGame();
+        });
+    </script>
+</body>
+</html>
